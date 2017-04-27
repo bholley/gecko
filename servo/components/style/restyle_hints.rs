@@ -538,6 +538,7 @@ impl DependencySet {
     }
 
     /// Adds a selector to this `DependencySet`.
+    #[inline(never)]
     pub fn note_selector(&mut self, selector: &Selector<SelectorImpl>) {
         let mut is_pseudo_element = selector.pseudo_element.is_some();
 

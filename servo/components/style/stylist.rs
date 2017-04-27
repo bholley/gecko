@@ -298,6 +298,7 @@ impl Stylist {
         true
     }
 
+    #[inline(never)]
     fn add_stylesheet<'a>(&mut self, stylesheet: &Stylesheet, guard: &SharedRwLockReadGuard,
                           extra_data: &mut ExtraStyleData<'a>) {
         if stylesheet.disabled() || !stylesheet.is_effective_for_device(&self.device, guard) {
@@ -348,7 +349,7 @@ impl Stylist {
         });
     }
 
-    #[inline]
+    #[inline(never)]
     fn add_rule_to_map(&mut self,
                        guard: &SharedRwLockReadGuard,
                        selector: &Selector<SelectorImpl>,
@@ -371,7 +372,7 @@ impl Stylist {
                              selector.specificity));
     }
 
-    #[inline]
+    #[inline(never)]
     fn note_for_revalidation(&mut self, selector: &Selector<SelectorImpl>) {
         if needs_revalidation(selector) {
             // For revalidation, we can skip everything left of the first ancestor
@@ -1251,6 +1252,7 @@ impl SelectorMap {
 
     /// Insert rule into the correct hash.
     /// Order in which to try: id_hash, class_hash, local_name_hash, other_rules.
+    #[inline(never)]
     pub fn insert(&mut self, rule: Rule) {
         self.empty = false;
 
@@ -1429,7 +1431,7 @@ impl ApplicableDeclarationBlock {
     }
 }
 
-#[inline]
+#[inline(never)]
 fn find_push<Str: Eq + Hash>(map: &mut FnvHashMap<Str, Vec<Rule>>, key: Str,
                              value: Rule) {
     map.entry(key).or_insert_with(Vec::new).push(value)
