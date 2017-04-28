@@ -7,6 +7,7 @@
 #![deny(missing_docs)]
 
 use Atom;
+use chunkvec::ChunkVec;
 use dom::TElement;
 use element_state::*;
 #[cfg(feature = "gecko")]
@@ -502,11 +503,11 @@ impl SelectorVisitor for SensitivitiesVisitor {
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct DependencySet {
     /// Dependencies only affected by state.
-    state_deps: Vec<Dependency>,
+    state_deps: ChunkVec<Dependency>,
     /// Dependencies only affected by attributes.
-    attr_deps: Vec<Dependency>,
+    attr_deps: ChunkVec<Dependency>,
     /// Dependencies affected by both.
-    common_deps: Vec<Dependency>,
+    common_deps: ChunkVec<Dependency>,
 }
 
 impl DependencySet {
@@ -585,9 +586,9 @@ impl DependencySet {
     /// Create an empty `DependencySet`.
     pub fn new() -> Self {
         DependencySet {
-            state_deps: vec![],
-            attr_deps: vec![],
-            common_deps: vec![],
+            state_deps: Default::default(),
+            attr_deps: Default::default(),
+            common_deps: Default::default(),
         }
     }
 
@@ -643,7 +644,7 @@ impl DependencySet {
         hint
     }
 
-    fn compute_partial_hint<E>(deps: &[Dependency],
+    fn compute_partial_hint<E>(deps: &ChunkVec<Dependency>,
                                element: &E,
                                snapshot: &ElementWrapper<E>,
                                state_changes: &ElementState,
@@ -654,7 +655,7 @@ impl DependencySet {
         if hint.is_all() {
             return;
         }
-        for dep in deps {
+        for dep in deps.iter() {
             debug_assert!((!state_changes.is_empty() && !dep.sensitivities.states.is_empty()) ||
                           (attrs_changed && dep.sensitivities.attrs),
                           "Testing a known ineffective dependency?");
