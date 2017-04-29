@@ -9,6 +9,7 @@
 use {Atom, LocalName};
 use bit_vec::BitVec;
 use data::ComputedStyle;
+use chunkvec::ChunkVec;
 use dom::{AnimationRules, PresentationalHintsSynthetizer, TElement};
 use error_reporting::RustLogReporter;
 use font_metrics::FontMetricsProvider;
@@ -1051,13 +1052,13 @@ impl PerPseudoElementSelectorMap {
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct SelectorMap {
     /// A hash from an ID to rules which contain that ID selector.
-    pub id_hash: FnvHashMap<Atom, Vec<Rule>>,
+    pub id_hash: FnvHashMap<Atom, ChunkVec<Rule>>,
     /// A hash from a class name to rules which contain that class selector.
-    pub class_hash: FnvHashMap<Atom, Vec<Rule>>,
+    pub class_hash: FnvHashMap<Atom, ChunkVec<Rule>>,
     /// A hash from local name to rules which contain that local name selector.
-    pub local_name_hash: FnvHashMap<LocalName, Vec<Rule>>,
+    pub local_name_hash: FnvHashMap<LocalName, ChunkVec<Rule>>,
     /// Rules that don't have ID, class, or element selectors.
-    pub other_rules: Vec<Rule>,
+    pub other_rules: ChunkVec<Rule>,
     /// Whether this hash is empty.
     pub empty: bool,
 }
@@ -1074,7 +1075,7 @@ impl SelectorMap {
             id_hash: HashMap::default(),
             class_hash: HashMap::default(),
             local_name_hash: HashMap::default(),
-            other_rules: Vec::new(),
+            other_rules: ChunkVec::default(),
             empty: true,
         }
     }
@@ -1191,7 +1192,7 @@ impl SelectorMap {
     fn get_matching_rules_from_hash<E, Str, BorrowedStr: ?Sized, Vector, F>(
         element: &E,
         parent_bf: Option<&BloomFilter>,
-        hash: &FnvHashMap<Str, Vec<Rule>>,
+        hash: &FnvHashMap<Str, ChunkVec<Rule>>,
         key: &BorrowedStr,
         matching_rules: &mut Vector,
         relations: &mut StyleRelations,
@@ -1217,7 +1218,7 @@ impl SelectorMap {
     /// Adds rules in `rules` that match `element` to the `matching_rules` list.
     fn get_matching_rules<E, V, F>(element: &E,
                                    parent_bf: Option<&BloomFilter>,
-                                   rules: &[Rule],
+                                   rules: &ChunkVec<Rule>,
                                    matching_rules: &mut V,
                                    relations: &mut StyleRelations,
                                    flags_setter: &mut F,
@@ -1432,7 +1433,7 @@ impl ApplicableDeclarationBlock {
 }
 
 #[inline(never)]
-fn find_push<Str: Eq + Hash>(map: &mut FnvHashMap<Str, Vec<Rule>>, key: Str,
+fn find_push<Str: Eq + Hash>(map: &mut FnvHashMap<Str, ChunkVec<Rule>>, key: Str,
                              value: Rule) {
-    map.entry(key).or_insert_with(Vec::new).push(value)
+    map.entry(key).or_insert_with(ChunkVec::default).push(value)
 }
