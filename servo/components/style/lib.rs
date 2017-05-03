@@ -83,6 +83,7 @@ extern crate time;
 extern crate unicode_segmentation;
 
 pub mod animation;
+pub mod arena;
 #[allow(missing_docs)] // TODO.
 #[cfg(feature = "servo")] pub mod attr;
 pub mod bezier;
