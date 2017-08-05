@@ -78,6 +78,10 @@ const uint32_t nsStyleContext::sDependencyTable[] = {
 
 #endif
 
+static int styleContextCount = 0;
+static int textContextCount = 0;
+static int otherPseudoCount = 0;
+
 nsStyleContext::nsStyleContext(nsIAtom* aPseudoTag,
                                CSSPseudoElementType aPseudoType)
   : mPseudoTag(aPseudoTag)
@@ -86,6 +90,19 @@ nsStyleContext::nsStyleContext(nsIAtom* aPseudoTag,
   , mFrameRefCnt(0)
 #endif
 {
+  if (XRE_IsContentProcess()) {
+    ++styleContextCount;
+    fprintf(stderr, "COUNT INC: %d\n", styleContextCount);
+
+    if (aPseudoTag == nsCSSAnonBoxes::mozText) {
+      ++textContextCount;
+      fprintf(stderr, "TEXT COUNT INC: %d\n", textContextCount);
+    } else if (aPseudoTag) {
+      ++otherPseudoCount;
+      fprintf(stderr, "OTHER PSEUDO COUNT INC: %d\n", otherPseudoCount);
+    }
+  }
+
   // This check has to be done "backward", because if it were written the
   // more natural way it wouldn't fail even when it needed to.
   static_assert((UINT64_MAX >> NS_STYLE_CONTEXT_TYPE_SHIFT) >=
@@ -103,6 +120,22 @@ nsStyleContext::nsStyleContext(nsIAtom* aPseudoTag,
                   == nsStyleStructID_Length,
                 "Number of items in dependency table doesn't match IDs");
 #endif
+}
+
+nsStyleContext::~nsStyleContext()
+{
+  if (XRE_IsContentProcess()) {
+    --styleContextCount;
+    fprintf(stderr, "COUNT DEC: %d\n", styleContextCount);
+
+    if (mPseudoTag == nsCSSAnonBoxes::mozText) {
+      --textContextCount;
+      fprintf(stderr, "TEXT COUNT DEC: %d\n", textContextCount);
+    } else if (mPseudoTag) {
+      --otherPseudoCount;
+      fprintf(stderr, "OTHER PSEUDO COUNT DEC: %d\n", otherPseudoCount);
+    }
+  }
 }
 
 nsChangeHint

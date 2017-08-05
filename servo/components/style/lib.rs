@@ -45,6 +45,7 @@ extern crate bit_vec;
 extern crate bitflags;
 #[allow(unused_extern_crates)] extern crate byteorder;
 #[cfg(feature = "gecko")] #[macro_use] #[no_link] extern crate cfg_if;
+extern crate core;
 #[macro_use] extern crate cssparser;
 extern crate euclid;
 extern crate fnv;

@@ -11,6 +11,7 @@
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
 use app_units::Au;
+use core::sync::atomic::{ATOMIC_USIZE_INIT, Ordering};
 use custom_properties::CustomPropertiesMap;
 use gecko_bindings::bindings;
 % for style_struct in data.style_structs:
@@ -60,6 +61,7 @@ use selector_parser::PseudoElement;
 use servo_arc::{Arc, RawOffsetArc};
 use std::mem::{forget, uninitialized, transmute, zeroed};
 use std::{cmp, ops, ptr};
+use std::sync::atomic::AtomicUsize;
 use stylesheets::{MallocSizeOfWithRepeats, SizeOfState};
 use values::{self, Auto, CustomIdent, Either, KeyframesName};
 use values::computed::ToComputedValue;
@@ -80,6 +82,8 @@ pub type ComputedValuesInner = ::gecko_bindings::structs::ServoComputedData;
 #[repr(C)]
 pub struct ComputedValues(::gecko_bindings::structs::mozilla::ServoStyleContext);
 
+static COMPUTED_VALUES_COUNTER : AtomicUsize = ATOMIC_USIZE_INIT;
+
 impl ComputedValues {
     pub fn new(
         device: &Device,
@@ -95,6 +99,8 @@ impl ComputedValues {
         ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
         % endfor
     ) -> Arc<Self> {
+        let old_value = COMPUTED_VALUES_COUNTER.fetch_add(1, Ordering::SeqCst);
+        println!("STYLO INC: {}", old_value+1);
         ComputedValuesInner::new(
             custom_properties,
             writing_mode,
@@ -113,6 +119,8 @@ impl ComputedValues {
     }
 
     pub fn default_values(pres_context: RawGeckoPresContextBorrowed) -> Arc<Self> {
+        let old_value = COMPUTED_VALUES_COUNTER.fetch_add(1, Ordering::SeqCst);
+        println!("STYLO INC: {}", old_value+1);
         ComputedValuesInner::new(
             /* custom_properties = */ None,
             /* writing_mode = */ WritingMode::empty(), // FIXME(bz): This seems dubious
@@ -153,6 +161,8 @@ impl ComputedValues {
 
 impl Drop for ComputedValues {
     fn drop(&mut self) {
+        let old_value = COMPUTED_VALUES_COUNTER.fetch_sub(1, Ordering::SeqCst);
+        println!("STYLO DEC: {}", old_value-1);
         unsafe {
             bindings::Gecko_ServoStyleContext_Destroy(&mut self.0);
         }

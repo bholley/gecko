@@ -311,7 +311,7 @@ public:
 
 protected:
   // protected destructor to discourage deletion outside of Release()
-  ~nsStyleContext() {}
+  ~nsStyleContext();
 
   // Delegated Helper constructor.
   nsStyleContext(nsIAtom* aPseudoTag,
