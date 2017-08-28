@@ -18,7 +18,7 @@ pub mod origin;
 mod page_rule;
 mod rule_list;
 mod rule_parser;
-mod rules_iterator;
+pub mod rules_iterator;
 mod style_rule;
 mod stylesheet;
 pub mod supports_rule;

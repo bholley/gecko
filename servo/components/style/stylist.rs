@@ -45,6 +45,7 @@ use stylesheets::{CssRule, StyleRule};
 use stylesheets::{StylesheetInDocument, Origin, OriginSet, PerOrigin, PerOriginIter};
 use stylesheets::UserAgentStylesheets;
 use stylesheets::keyframes_rule::KeyframesAnimation;
+use stylesheets::rules_iterator::EffectiveRulesIterator;
 use stylesheets::viewport_rule::{self, MaybeNew, ViewportRule};
 use thread_state;
 
@@ -224,148 +225,26 @@ impl DocumentCascadeAndInvalidationData {
         let origin = stylesheet.origin(guard);
         let cascade_and_invalidation_data =
             self.per_origin.borrow_mut_for_origin(&origin);
-        let cascade_data = &mut cascade_and_invalidation_data.cascade;
-        let invalidation_data = &mut cascade_and_invalidation_data.invalidation;
+        let mut cascade_data = &mut cascade_and_invalidation_data.cascade;
+        let mut invalidation_data = &mut cascade_and_invalidation_data.invalidation;
 
         if rebuild_kind.should_rebuild_invalidation() {
             invalidation_data.effective_media_query_results
                              .saw_effective(stylesheet);
         }
 
-        for rule in stylesheet.effective_rules(device, guard) {
-            match *rule {
-                CssRule::Style(ref locked) => {
-                    let style_rule = locked.read_with(&guard);
-                    cascade_data.num_declarations +=
-                        style_rule.block.read_with(&guard).len();
-                    for selector in &style_rule.selectors.0 {
-                        cascade_data.num_selectors += 1;
-
-                        let map = match selector.pseudo_element() {
-                            Some(pseudo) if pseudo.is_precomputed() => {
-                                if !selector.is_universal() ||
-                                   !matches!(origin, Origin::UserAgent) {
-                                    // ::-moz-tree selectors may appear in
-                                    // non-UA sheets (even though they never
-                                    // match).
-                                    continue;
-                                }
-
-                                self.precomputed_pseudo_element_decls
-                                    .get_or_insert_with(&pseudo.canonical(), Vec::new)
-                                    .expect("Unexpected tree pseudo-element?")
-                                    .push(ApplicableDeclarationBlock::new(
-                                        StyleSource::Style(locked.clone()),
-                                        cascade_data.rules_source_order,
-                                        CascadeLevel::UANormal,
-                                        selector.specificity()
-                                    ));
-
-                                continue;
-                            }
-                            None => &mut cascade_data.element_map,
-                            Some(pseudo) => {
-                                cascade_data
-                                    .pseudos_map
-                                    .get_or_insert_with(&pseudo.canonical(), SelectorMap::new)
-                                    .expect("Unexpected tree pseudo-element?")
-                            }
-                        };
-
-                        let hashes =
-                            AncestorHashes::new(&selector, quirks_mode);
-
-                        let rule = Rule::new(
-                            selector.clone(),
-                            hashes.clone(),
-                            locked.clone(),
-                            cascade_data.rules_source_order
-                        );
-
-                        map.insert(rule, quirks_mode);
-
-                        if rebuild_kind.should_rebuild_invalidation() {
-                            invalidation_data
-                                .invalidation_map
-                                .note_selector(selector, quirks_mode);
-                            let mut visitor = StylistSelectorVisitor {
-                                needs_revalidation: false,
-                                passed_rightmost_selector: false,
-                                attribute_dependencies: &mut invalidation_data.attribute_dependencies,
-                                style_attribute_dependency: &mut invalidation_data.style_attribute_dependency,
-                                state_dependencies: &mut invalidation_data.state_dependencies,
-                                mapped_ids: &mut invalidation_data.mapped_ids,
-                            };
-
-                            selector.visit(&mut visitor);
-
-                            if visitor.needs_revalidation {
-                                invalidation_data.selectors_for_cache_revalidation.insert(
-                                    RevalidationSelectorAndHashes::new(selector.clone(), hashes),
-                                    quirks_mode
-                                );
-                            }
-                        }
-                    }
-                    cascade_data.rules_source_order += 1;
-                }
-                CssRule::Import(ref lock) => {
-                    if rebuild_kind.should_rebuild_invalidation() {
-                        let import_rule = lock.read_with(guard);
-                        invalidation_data
-                            .effective_media_query_results
-                            .saw_effective(import_rule);
-                    }
-
-                    // NOTE: effective_rules visits the inner stylesheet if
-                    // appropriate.
-                }
-                CssRule::Media(ref lock) => {
-                    if rebuild_kind.should_rebuild_invalidation() {
-                        let media_rule = lock.read_with(guard);
-                        invalidation_data
-                            .effective_media_query_results
-                            .saw_effective(media_rule);
-                    }
-                }
-                CssRule::Keyframes(ref keyframes_rule) => {
-                    let keyframes_rule = keyframes_rule.read_with(guard);
-                    debug!("Found valid keyframes rule: {:?}", *keyframes_rule);
-
-                    // Don't let a prefixed keyframes animation override a non-prefixed one.
-                    let needs_insertion =
-                        keyframes_rule.vendor_prefix.is_none() ||
-                        cascade_data.animations.get(keyframes_rule.name.as_atom())
-                            .map_or(true, |rule| rule.vendor_prefix.is_some());
-                    if needs_insertion {
-                        let animation = KeyframesAnimation::from_keyframes(
-                            &keyframes_rule.keyframes, keyframes_rule.vendor_prefix.clone(), guard);
-                        debug!("Found valid keyframe animation: {:?}", animation);
-                        cascade_data.animations.insert(keyframes_rule.name.as_atom().clone(), animation);
-                    }
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::FontFace(ref rule) => {
-                    _extra_data
-                        .borrow_mut_for_origin(&origin)
-                        .add_font_face(rule);
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::FontFeatureValues(ref rule) => {
-                    _extra_data
-                        .borrow_mut_for_origin(&origin)
-                        .add_font_feature_values(rule);
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::CounterStyle(ref rule) => {
-                    _extra_data
-                        .borrow_mut_for_origin(&origin)
-                        .add_counter_style(guard, rule);
-                }
-                // We don't care about any other rule.
-                _ => {}
-            }
-        }
+        let effective_rules_iter = stylesheet.effective_rules(device, guard);
+        note_rules_for_cascade_and_invalidation(
+            effective_rules_iter,
+            guard,
+            _extra_data,
+            &mut self.precomputed_pseudo_element_decls,
+            quirks_mode,
+            rebuild_kind,
+            origin,
+            &mut cascade_data,
+            &mut invalidation_data,
+        );
     }
 }
 
@@ -1570,6 +1449,154 @@ impl Stylist {
     /// Accessor for a shared reference to the rule tree.
     pub fn rule_tree(&self) -> &RuleTree {
         &self.rule_tree
+    }
+}
+
+fn note_rules_for_cascade_and_invalidation<'a, 'b>(
+    iter: EffectiveRulesIterator<'a, 'b>,
+    guard: &SharedRwLockReadGuard,
+    _extra_data: &mut PerOrigin<ExtraStyleData>,
+    precomputed_pseudo_element_decls: &mut PerPseudoElementMap<Vec<ApplicableDeclarationBlock>>,
+    quirks_mode: QuirksMode,
+    rebuild_kind: SheetRebuildKind,
+    origin: Origin,
+    cascade_data: &mut CascadeData,
+    invalidation_data: &mut InvalidationData,
+)
+{
+    for rule in iter {
+        match *rule {
+            CssRule::Style(ref locked) => {
+                let style_rule = locked.read_with(&guard);
+                cascade_data.num_declarations +=
+                    style_rule.block.read_with(&guard).len();
+                for selector in &style_rule.selectors.0 {
+                    cascade_data.num_selectors += 1;
+
+                    let map = match selector.pseudo_element() {
+                        Some(pseudo) if pseudo.is_precomputed() => {
+                            if !selector.is_universal() ||
+                               !matches!(origin, Origin::UserAgent) {
+                                // ::-moz-tree selectors may appear in
+                                // non-UA sheets (even though they never
+                                // match).
+                                continue;
+                            }
+
+                            precomputed_pseudo_element_decls
+                                .get_or_insert_with(&pseudo.canonical(), Vec::new)
+                                .expect("Unexpected tree pseudo-element?")
+                                .push(ApplicableDeclarationBlock::new(
+                                    StyleSource::Style(locked.clone()),
+                                    cascade_data.rules_source_order,
+                                    CascadeLevel::UANormal,
+                                    selector.specificity()
+                                ));
+
+                            continue;
+                        }
+                        None => &mut cascade_data.element_map,
+                        Some(pseudo) => {
+                            cascade_data
+                                .pseudos_map
+                                .get_or_insert_with(&pseudo.canonical(), SelectorMap::new)
+                                .expect("Unexpected tree pseudo-element?")
+                        }
+                    };
+
+                    let hashes =
+                        AncestorHashes::new(&selector, quirks_mode);
+
+                    let rule = Rule::new(
+                        selector.clone(),
+                        hashes.clone(),
+                        locked.clone(),
+                        cascade_data.rules_source_order
+                    );
+
+                    map.insert(rule, quirks_mode);
+
+                    if rebuild_kind.should_rebuild_invalidation() {
+                        invalidation_data
+                            .invalidation_map
+                            .note_selector(selector, quirks_mode);
+                        let mut visitor = StylistSelectorVisitor {
+                            needs_revalidation: false,
+                            passed_rightmost_selector: false,
+                            attribute_dependencies: &mut invalidation_data.attribute_dependencies,
+                            style_attribute_dependency: &mut invalidation_data.style_attribute_dependency,
+                            state_dependencies: &mut invalidation_data.state_dependencies,
+                            mapped_ids: &mut invalidation_data.mapped_ids,
+                        };
+
+                        selector.visit(&mut visitor);
+
+                        if visitor.needs_revalidation {
+                            invalidation_data.selectors_for_cache_revalidation.insert(
+                                RevalidationSelectorAndHashes::new(selector.clone(), hashes),
+                                quirks_mode
+                            );
+                        }
+                    }
+                }
+                cascade_data.rules_source_order += 1;
+            }
+            CssRule::Import(ref lock) => {
+                if rebuild_kind.should_rebuild_invalidation() {
+                    let import_rule = lock.read_with(guard);
+                    invalidation_data
+                        .effective_media_query_results
+                        .saw_effective(import_rule);
+                }
+
+                // NOTE: effective_rules visits the inner stylesheet if
+                // appropriate.
+            }
+            CssRule::Media(ref lock) => {
+                if rebuild_kind.should_rebuild_invalidation() {
+                    let media_rule = lock.read_with(guard);
+                    invalidation_data
+                        .effective_media_query_results
+                        .saw_effective(media_rule);
+                }
+            }
+            CssRule::Keyframes(ref keyframes_rule) => {
+                let keyframes_rule = keyframes_rule.read_with(guard);
+                debug!("Found valid keyframes rule: {:?}", *keyframes_rule);
+
+                // Don't let a prefixed keyframes animation override a non-prefixed one.
+                let needs_insertion =
+                    keyframes_rule.vendor_prefix.is_none() ||
+                    cascade_data.animations.get(keyframes_rule.name.as_atom())
+                        .map_or(true, |rule| rule.vendor_prefix.is_some());
+                if needs_insertion {
+                    let animation = KeyframesAnimation::from_keyframes(
+                        &keyframes_rule.keyframes, keyframes_rule.vendor_prefix.clone(), guard);
+                    debug!("Found valid keyframe animation: {:?}", animation);
+                    cascade_data.animations.insert(keyframes_rule.name.as_atom().clone(), animation);
+                }
+            }
+            #[cfg(feature = "gecko")]
+            CssRule::FontFace(ref rule) => {
+                _extra_data
+                    .borrow_mut_for_origin(&origin)
+                    .add_font_face(rule);
+            }
+            #[cfg(feature = "gecko")]
+            CssRule::FontFeatureValues(ref rule) => {
+                _extra_data
+                    .borrow_mut_for_origin(&origin)
+                    .add_font_feature_values(rule);
+            }
+            #[cfg(feature = "gecko")]
+            CssRule::CounterStyle(ref rule) => {
+                _extra_data
+                    .borrow_mut_for_origin(&origin)
+                    .add_counter_style(guard, rule);
+            }
+            // We don't care about any other rule.
+            _ => {}
+        }
     }
 }
 
