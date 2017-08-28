@@ -58,12 +58,20 @@ pub type StylistSheet = ::stylesheets::DocumentStyleSheet;
 #[cfg(feature = "gecko")]
 pub type StylistSheet = ::gecko::data::GeckoStyleSheet;
 
+/// Joint storage for cascade and invalidation data.
+#[derive(Default)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+struct CascadeAndInvalidationData {
+    cascade: CascadeData,
+    invalidation: InvalidationData,
+}
+
 /// All the computed information for a stylesheet.
 #[derive(Default)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-struct DocumentCascadeData {
+struct DocumentCascadeAndInvalidationData {
     /// Common data for all the origins.
-    per_origin: PerOrigin<CascadeData>,
+    per_origin: PerOrigin<CascadeAndInvalidationData>,
 
     /// Applicable declarations for a given non-eagerly cascaded pseudo-element.
     ///
@@ -76,8 +84,8 @@ struct DocumentCascadeData {
     precomputed_pseudo_element_decls: PerPseudoElementMap<Vec<ApplicableDeclarationBlock>>,
 }
 
-impl DocumentCascadeData {
-    fn iter_origins(&self) -> PerOriginIter<CascadeData> {
+impl DocumentCascadeAndInvalidationData {
+    fn iter_origins(&self) -> PerOriginIter<CascadeAndInvalidationData> {
         self.per_origin.iter_origins()
     }
 
@@ -98,7 +106,7 @@ impl DocumentCascadeData {
     {
         debug_assert!(!flusher.nothing_to_do());
 
-        for (cascade_data, origin) in self.per_origin.iter_mut_origins() {
+        for (data, origin) in self.per_origin.iter_mut_origins() {
             let validity = flusher.origin_validity(origin);
 
             if validity == OriginValidity::Valid {
@@ -111,10 +119,11 @@ impl DocumentCascadeData {
 
             extra_data.borrow_mut_for_origin(&origin).clear();
             if validity == OriginValidity::CascadeInvalid {
-                cascade_data.clear_cascade_data()
+                data.cascade.clear()
             } else {
                 debug_assert_eq!(validity, OriginValidity::FullyInvalid);
-                cascade_data.clear();
+                data.cascade.clear();
+                data.invalidation.clear();
             }
         }
 
@@ -213,23 +222,24 @@ impl DocumentCascadeData {
         }
 
         let origin = stylesheet.origin(guard);
-        let origin_cascade_data =
+        let cascade_and_invalidation_data =
             self.per_origin.borrow_mut_for_origin(&origin);
+        let cascade_data = &mut cascade_and_invalidation_data.cascade;
+        let invalidation_data = &mut cascade_and_invalidation_data.invalidation;
 
         if rebuild_kind.should_rebuild_invalidation() {
-            origin_cascade_data
-                .effective_media_query_results
-                .saw_effective(stylesheet);
+            invalidation_data.effective_media_query_results
+                             .saw_effective(stylesheet);
         }
 
         for rule in stylesheet.effective_rules(device, guard) {
             match *rule {
                 CssRule::Style(ref locked) => {
                     let style_rule = locked.read_with(&guard);
-                    origin_cascade_data.num_declarations +=
+                    cascade_data.num_declarations +=
                         style_rule.block.read_with(&guard).len();
                     for selector in &style_rule.selectors.0 {
-                        origin_cascade_data.num_selectors += 1;
+                        cascade_data.num_selectors += 1;
 
                         let map = match selector.pseudo_element() {
                             Some(pseudo) if pseudo.is_precomputed() => {
@@ -246,16 +256,16 @@ impl DocumentCascadeData {
                                     .expect("Unexpected tree pseudo-element?")
                                     .push(ApplicableDeclarationBlock::new(
                                         StyleSource::Style(locked.clone()),
-                                        origin_cascade_data.rules_source_order,
+                                        cascade_data.rules_source_order,
                                         CascadeLevel::UANormal,
                                         selector.specificity()
                                     ));
 
                                 continue;
                             }
-                            None => &mut origin_cascade_data.element_map,
+                            None => &mut cascade_data.element_map,
                             Some(pseudo) => {
-                                origin_cascade_data
+                                cascade_data
                                     .pseudos_map
                                     .get_or_insert_with(&pseudo.canonical(), SelectorMap::new)
                                     .expect("Unexpected tree pseudo-element?")
@@ -269,40 +279,40 @@ impl DocumentCascadeData {
                             selector.clone(),
                             hashes.clone(),
                             locked.clone(),
-                            origin_cascade_data.rules_source_order
+                            cascade_data.rules_source_order
                         );
 
                         map.insert(rule, quirks_mode);
 
                         if rebuild_kind.should_rebuild_invalidation() {
-                            origin_cascade_data
+                            invalidation_data
                                 .invalidation_map
                                 .note_selector(selector, quirks_mode);
                             let mut visitor = StylistSelectorVisitor {
                                 needs_revalidation: false,
                                 passed_rightmost_selector: false,
-                                attribute_dependencies: &mut origin_cascade_data.attribute_dependencies,
-                                style_attribute_dependency: &mut origin_cascade_data.style_attribute_dependency,
-                                state_dependencies: &mut origin_cascade_data.state_dependencies,
-                                mapped_ids: &mut origin_cascade_data.mapped_ids,
+                                attribute_dependencies: &mut invalidation_data.attribute_dependencies,
+                                style_attribute_dependency: &mut invalidation_data.style_attribute_dependency,
+                                state_dependencies: &mut invalidation_data.state_dependencies,
+                                mapped_ids: &mut invalidation_data.mapped_ids,
                             };
 
                             selector.visit(&mut visitor);
 
                             if visitor.needs_revalidation {
-                                origin_cascade_data.selectors_for_cache_revalidation.insert(
+                                invalidation_data.selectors_for_cache_revalidation.insert(
                                     RevalidationSelectorAndHashes::new(selector.clone(), hashes),
                                     quirks_mode
                                 );
                             }
                         }
                     }
-                    origin_cascade_data.rules_source_order += 1;
+                    cascade_data.rules_source_order += 1;
                 }
                 CssRule::Import(ref lock) => {
                     if rebuild_kind.should_rebuild_invalidation() {
                         let import_rule = lock.read_with(guard);
-                        origin_cascade_data
+                        invalidation_data
                             .effective_media_query_results
                             .saw_effective(import_rule);
                     }
@@ -313,7 +323,7 @@ impl DocumentCascadeData {
                 CssRule::Media(ref lock) => {
                     if rebuild_kind.should_rebuild_invalidation() {
                         let media_rule = lock.read_with(guard);
-                        origin_cascade_data
+                        invalidation_data
                             .effective_media_query_results
                             .saw_effective(media_rule);
                     }
@@ -325,13 +335,13 @@ impl DocumentCascadeData {
                     // Don't let a prefixed keyframes animation override a non-prefixed one.
                     let needs_insertion =
                         keyframes_rule.vendor_prefix.is_none() ||
-                        origin_cascade_data.animations.get(keyframes_rule.name.as_atom())
+                        cascade_data.animations.get(keyframes_rule.name.as_atom())
                             .map_or(true, |rule| rule.vendor_prefix.is_some());
                     if needs_insertion {
                         let animation = KeyframesAnimation::from_keyframes(
                             &keyframes_rule.keyframes, keyframes_rule.vendor_prefix.clone(), guard);
                         debug!("Found valid keyframe animation: {:?}", animation);
-                        origin_cascade_data.animations.insert(keyframes_rule.name.as_atom().clone(), animation);
+                        cascade_data.animations.insert(keyframes_rule.name.as_atom().clone(), animation);
                     }
                 }
                 #[cfg(feature = "gecko")]
@@ -422,7 +432,7 @@ pub struct Stylist {
     /// Selector maps for all of the style sheets in the stylist, after
     /// evalutaing media rules against the current device, split out per
     /// cascade level.
-    cascade_data: DocumentCascadeData,
+    cascade_data: DocumentCascadeAndInvalidationData,
 
     /// The rule tree, that stores the results of selector matching.
     rule_tree: RuleTree,
@@ -471,12 +481,12 @@ impl Stylist {
 
     /// Returns the number of selectors.
     pub fn num_selectors(&self) -> usize {
-        self.cascade_data.iter_origins().map(|(d, _)| d.num_selectors).sum()
+        self.cascade_data.iter_origins().map(|(d, _)| d.cascade.num_selectors).sum()
     }
 
     /// Returns the number of declarations.
     pub fn num_declarations(&self) -> usize {
-        self.cascade_data.iter_origins().map(|(d, _)| d.num_declarations).sum()
+        self.cascade_data.iter_origins().map(|(d, _)| d.cascade.num_declarations).sum()
     }
 
     /// Returns the number of times the stylist has been rebuilt.
@@ -487,13 +497,13 @@ impl Stylist {
     /// Returns the number of revalidation_selectors.
     pub fn num_revalidation_selectors(&self) -> usize {
         self.cascade_data.iter_origins()
-            .map(|(d, _)| d.selectors_for_cache_revalidation.len()).sum()
+            .map(|(d, _)| d.invalidation.selectors_for_cache_revalidation.len()).sum()
     }
 
     /// Returns the number of entries in invalidation maps.
     pub fn num_invalidations(&self) -> usize {
         self.cascade_data.iter_origins()
-            .map(|(d, _)| d.invalidation_map.len()).sum()
+            .map(|(d, _)| d.invalidation.invalidation_map.len()).sum()
     }
 
     /// Invokes `f` with the `InvalidationMap` for each origin.
@@ -505,7 +515,7 @@ impl Stylist {
         where F: FnMut(&InvalidationMap)
     {
         for (data, _) in self.cascade_data.iter_origins() {
-            f(&data.invalidation_map)
+            f(&data.invalidation.invalidation_map)
         }
     }
 
@@ -645,13 +655,14 @@ impl Stylist {
         if *local_name == local_name!("style") {
             self.cascade_data
                 .iter_origins()
-                .any(|(d, _)| d.style_attribute_dependency)
+                .any(|(d, _)| d.invalidation.style_attribute_dependency)
         } else {
             self.cascade_data
                 .iter_origins()
                 .any(|(d, _)| {
-                    d.attribute_dependencies
-                        .might_contain_hash(local_name.get_hash())
+                    d.invalidation
+                     .attribute_dependencies
+                     .might_contain_hash(local_name.get_hash())
                 })
         }
     }
@@ -667,7 +678,7 @@ impl Stylist {
     pub fn has_state_dependency(&self, state: ElementState) -> bool {
         self.cascade_data
             .iter_origins()
-            .any(|(d, _)| d.state_dependencies.intersects(state))
+            .any(|(d, _)| d.invalidation.state_dependencies.intersects(state))
     }
 
     /// Computes the style for a given "precomputed" pseudo-element, taking the
@@ -937,7 +948,7 @@ impl Stylist {
     fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
         self.cascade_data
             .iter_origins()
-            .any(|(d, _)| d.has_rules_for_pseudo(pseudo))
+            .any(|(d, _)| d.cascade.has_rules_for_pseudo(pseudo))
     }
 
     /// Computes the cascade inputs for a lazily-cascaded pseudo-element.
@@ -1127,13 +1138,13 @@ impl Stylist {
                 continue;
             }
 
-            let origin_cascade_data =
+            let per_origin_data =
                 self.cascade_data.per_origin.borrow_for_origin(&origin);
+            let effective_media_query_results =
+                &per_origin_data.invalidation.effective_media_query_results;
 
             let effective_then =
-                origin_cascade_data
-                    .effective_media_query_results
-                    .was_effective(stylesheet);
+                effective_media_query_results.was_effective(stylesheet);
 
             if effective_now != effective_then {
                 debug!(" > Stylesheet changed -> {}, {}",
@@ -1173,9 +1184,7 @@ impl Stylist {
                             import_rule.stylesheet
                                 .is_effective_for_device(&self.device, guard);
                         let effective_then =
-                            origin_cascade_data
-                                .effective_media_query_results
-                                .was_effective(import_rule);
+                            effective_media_query_results.was_effective(import_rule);
                         if effective_now != effective_then {
                             debug!(" > @import rule changed {} -> {}",
                                    effective_then, effective_now);
@@ -1193,9 +1202,7 @@ impl Stylist {
                         let effective_now =
                             mq.evaluate(&self.device, self.quirks_mode);
                         let effective_then =
-                            origin_cascade_data
-                                .effective_media_query_results
-                                .was_effective(media_rule);
+                            effective_media_query_results.was_effective(media_rule);
                         if effective_now != effective_then {
                             debug!(" > @media rule changed {} -> {}",
                                    effective_then, effective_now);
@@ -1256,7 +1263,7 @@ impl Stylist {
 
         // nsXBLPrototypeResources::LoadResources() loads Chrome XBL style
         // sheets under eAuthorSheetFeatures level.
-        if let Some(map) = self.cascade_data.per_origin.author.borrow_for_pseudo(pseudo_element) {
+        if let Some(map) = self.cascade_data.per_origin.author.cascade.borrow_for_pseudo(pseudo_element) {
             map.get_all_matching_rules(
                 element,
                 &rule_hash_target,
@@ -1304,7 +1311,7 @@ impl Stylist {
         let only_default_rules = rule_inclusion == RuleInclusion::DefaultOnly;
 
         // Step 1: Normal user-agent rules.
-        if let Some(map) = self.cascade_data.per_origin.user_agent.borrow_for_pseudo(pseudo_element) {
+        if let Some(map) = self.cascade_data.per_origin.user_agent.cascade.borrow_for_pseudo(pseudo_element) {
             map.get_all_matching_rules(
                 element,
                 &rule_hash_target,
@@ -1342,7 +1349,7 @@ impl Stylist {
         // Which may be more what you would probably expect.
         if rule_hash_target.matches_user_and_author_rules() {
             // Step 3a: User normal rules.
-            if let Some(map) = self.cascade_data.per_origin.user.borrow_for_pseudo(pseudo_element) {
+            if let Some(map) = self.cascade_data.per_origin.user.cascade.borrow_for_pseudo(pseudo_element) {
                 map.get_all_matching_rules(
                     element,
                     &rule_hash_target,
@@ -1369,7 +1376,7 @@ impl Stylist {
             // See nsStyleSet::FileRules().
             if !cut_off_inheritance {
                 // Step 3c: Author normal rules.
-                if let Some(map) = self.cascade_data.per_origin.author.borrow_for_pseudo(pseudo_element) {
+                if let Some(map) = self.cascade_data.per_origin.author.cascade.borrow_for_pseudo(pseudo_element) {
                     map.get_all_matching_rules(
                         element,
                         &rule_hash_target,
@@ -1455,7 +1462,7 @@ impl Stylist {
     pub fn may_have_rules_for_id(&self, id: &Atom) -> bool {
         self.cascade_data
             .iter_origins()
-            .any(|(d, _)| d.mapped_ids.might_contain_hash(id.get_hash()))
+            .any(|(d, _)| d.invalidation.mapped_ids.might_contain_hash(id.get_hash()))
     }
 
     /// Returns the registered `@keyframes` animation for the specified name.
@@ -1463,7 +1470,7 @@ impl Stylist {
     pub fn get_animation(&self, name: &Atom) -> Option<&KeyframesAnimation> {
         self.cascade_data
             .iter_origins()
-            .filter_map(|(d, _)| d.animations.get(name))
+            .filter_map(|(d, _)| d.cascade.animations.get(name))
             .next()
     }
 
@@ -1491,7 +1498,7 @@ impl Stylist {
         // this in the caller by asserting that the bitvecs are same-length.
         let mut results = BitVec::new();
         for (data, _) in self.cascade_data.iter_origins() {
-            data.selectors_for_cache_revalidation.lookup(
+            data.invalidation.selectors_for_cache_revalidation.lookup(
                 *element,
                 self.quirks_mode,
                 &mut |selector_and_hashes| {
@@ -1784,11 +1791,7 @@ impl<'a> SelectorVisitor for StylistSelectorVisitor<'a> {
     }
 }
 
-/// Data resulting from performing the CSS cascade that is specific to a given
-/// origin.
-///
-/// FIXME(emilio): Consider renaming and splitting in `CascadeData` and
-/// `InvalidationData`? That'd make `clear_cascade_data()` clearer.
+/// Data used for performing the CSS cascade that is specific to a given origin.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Debug)]
 struct CascadeData {
@@ -1803,8 +1806,66 @@ struct CascadeData {
     /// by name.
     animations: PrecomputedHashMap<Atom, KeyframesAnimation>,
 
+    /// A monotonically increasing counter to represent the order on which a
+    /// style rule appears in a stylesheet, needed to sort them by source order.
+    rules_source_order: u32,
+
+    /// The total number of selectors.
+    num_selectors: usize,
+
+    /// The total number of declarations.
+    num_declarations: usize,
+}
+
+impl CascadeData {
+    fn new() -> Self {
+        Self {
+            element_map: SelectorMap::new(),
+            pseudos_map: PerPseudoElementMap::default(),
+            animations: Default::default(),
+            rules_source_order: 0,
+            num_selectors: 0,
+            num_declarations: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.element_map.clear();
+        self.pseudos_map.clear();
+        self.animations.clear();
+        self.rules_source_order = 0;
+        self.num_selectors = 0;
+        self.num_declarations = 0;
+    }
+
+    #[inline]
+    fn borrow_for_pseudo(&self, pseudo: Option<&PseudoElement>) -> Option<&SelectorMap<Rule>> {
+        match pseudo {
+            Some(pseudo) => self.pseudos_map.get(&pseudo.canonical()),
+            None => Some(&self.element_map),
+        }
+    }
+
+    fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
+        self.pseudos_map.get(pseudo).is_some()
+    }
+}
+
+impl Default for CascadeData {
+    fn default() -> Self {
+        CascadeData::new()
+    }
+}
+
+/// Data used for performing style invalidation that is specific to a given origin.
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug)]
+struct InvalidationData {
     /// The invalidation map for the rules at this origin.
     invalidation_map: InvalidationMap,
+
+    /// Effective media query results cached from the last rebuild.
+    effective_media_query_results: EffectiveMediaQueryResults,
 
     /// The attribute local names that appear in attribute selectors.  Used
     /// to avoid taking element snapshots when an irrelevant attribute changes.
@@ -1838,27 +1899,11 @@ struct CascadeData {
     /// tree-structural state like child index and pseudos).
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     selectors_for_cache_revalidation: SelectorMap<RevalidationSelectorAndHashes>,
-
-    /// Effective media query results cached from the last rebuild.
-    effective_media_query_results: EffectiveMediaQueryResults,
-
-    /// A monotonically increasing counter to represent the order on which a
-    /// style rule appears in a stylesheet, needed to sort them by source order.
-    rules_source_order: u32,
-
-    /// The total number of selectors.
-    num_selectors: usize,
-
-    /// The total number of declarations.
-    num_declarations: usize,
 }
 
-impl CascadeData {
+impl InvalidationData {
     fn new() -> Self {
         Self {
-            element_map: SelectorMap::new(),
-            pseudos_map: PerPseudoElementMap::default(),
-            animations: Default::default(),
             invalidation_map: InvalidationMap::new(),
             attribute_dependencies: NonCountingBloomFilter::new(),
             style_attribute_dependency: false,
@@ -1866,36 +1911,10 @@ impl CascadeData {
             mapped_ids: NonCountingBloomFilter::new(),
             selectors_for_cache_revalidation: SelectorMap::new(),
             effective_media_query_results: EffectiveMediaQueryResults::new(),
-            rules_source_order: 0,
-            num_selectors: 0,
-            num_declarations: 0,
         }
-    }
-
-    #[inline]
-    fn borrow_for_pseudo(&self, pseudo: Option<&PseudoElement>) -> Option<&SelectorMap<Rule>> {
-        match pseudo {
-            Some(pseudo) => self.pseudos_map.get(&pseudo.canonical()),
-            None => Some(&self.element_map),
-        }
-    }
-
-    fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
-        self.pseudos_map.get(pseudo).is_some()
-    }
-
-    /// Clears the cascade data, but not the invalidation data.
-    fn clear_cascade_data(&mut self) {
-        self.element_map.clear();
-        self.pseudos_map.clear();
-        self.animations.clear();
-        self.rules_source_order = 0;
-        self.num_selectors = 0;
-        self.num_declarations = 0;
     }
 
     fn clear(&mut self) {
-        self.clear_cascade_data();
         self.effective_media_query_results.clear();
         self.invalidation_map.clear();
         self.attribute_dependencies.clear();
@@ -1906,9 +1925,9 @@ impl CascadeData {
     }
 }
 
-impl Default for CascadeData {
+impl Default for InvalidationData {
     fn default() -> Self {
-        CascadeData::new()
+        InvalidationData::new()
     }
 }
 
