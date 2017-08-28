@@ -13,6 +13,7 @@ use stylesheets::{CssRule, CssRules, DocumentRule, ImportRule, MediaRule, Suppor
 use stylesheets::StylesheetInDocument;
 
 /// An iterator over a list of rules.
+#[derive(Clone)]
 pub struct RulesIterator<'a, 'b, C>
     where 'b: 'a,
           C: NestedRuleIterationCondition + 'static,
@@ -180,6 +181,7 @@ pub trait NestedRuleIterationCondition {
 }
 
 /// A struct that represents the condition that a rule applies to the document.
+#[derive(Clone)]
 pub struct EffectiveRules;
 
 impl NestedRuleIterationCondition for EffectiveRules {

@@ -234,17 +234,24 @@ impl DocumentCascadeAndInvalidationData {
         }
 
         let effective_rules_iter = stylesheet.effective_rules(device, guard);
-        note_rules_for_cascade_and_invalidation(
-            effective_rules_iter,
+        note_rules_for_cascade(
+            effective_rules_iter.clone(),
             guard,
             _extra_data,
             &mut self.precomputed_pseudo_element_decls,
             quirks_mode,
-            rebuild_kind,
             origin,
             &mut cascade_data,
-            &mut invalidation_data,
         );
+
+        if rebuild_kind.should_rebuild_invalidation() {
+            note_rules_for_invalidation(
+                effective_rules_iter,
+                guard,
+                quirks_mode,
+                &mut invalidation_data,
+            );
+        }
     }
 }
 
@@ -1452,16 +1459,14 @@ impl Stylist {
     }
 }
 
-fn note_rules_for_cascade_and_invalidation<'a, 'b>(
+fn note_rules_for_cascade<'a, 'b>(
     iter: EffectiveRulesIterator<'a, 'b>,
     guard: &SharedRwLockReadGuard,
     _extra_data: &mut PerOrigin<ExtraStyleData>,
     precomputed_pseudo_element_decls: &mut PerPseudoElementMap<Vec<ApplicableDeclarationBlock>>,
     quirks_mode: QuirksMode,
-    rebuild_kind: SheetRebuildKind,
     origin: Origin,
     cascade_data: &mut CascadeData,
-    invalidation_data: &mut InvalidationData,
 )
 {
     for rule in iter {
@@ -1515,50 +1520,8 @@ fn note_rules_for_cascade_and_invalidation<'a, 'b>(
                     );
 
                     map.insert(rule, quirks_mode);
-
-                    if rebuild_kind.should_rebuild_invalidation() {
-                        invalidation_data
-                            .invalidation_map
-                            .note_selector(selector, quirks_mode);
-                        let mut visitor = StylistSelectorVisitor {
-                            needs_revalidation: false,
-                            passed_rightmost_selector: false,
-                            attribute_dependencies: &mut invalidation_data.attribute_dependencies,
-                            style_attribute_dependency: &mut invalidation_data.style_attribute_dependency,
-                            state_dependencies: &mut invalidation_data.state_dependencies,
-                            mapped_ids: &mut invalidation_data.mapped_ids,
-                        };
-
-                        selector.visit(&mut visitor);
-
-                        if visitor.needs_revalidation {
-                            invalidation_data.selectors_for_cache_revalidation.insert(
-                                RevalidationSelectorAndHashes::new(selector.clone(), hashes),
-                                quirks_mode
-                            );
-                        }
-                    }
                 }
                 cascade_data.rules_source_order += 1;
-            }
-            CssRule::Import(ref lock) => {
-                if rebuild_kind.should_rebuild_invalidation() {
-                    let import_rule = lock.read_with(guard);
-                    invalidation_data
-                        .effective_media_query_results
-                        .saw_effective(import_rule);
-                }
-
-                // NOTE: effective_rules visits the inner stylesheet if
-                // appropriate.
-            }
-            CssRule::Media(ref lock) => {
-                if rebuild_kind.should_rebuild_invalidation() {
-                    let media_rule = lock.read_with(guard);
-                    invalidation_data
-                        .effective_media_query_results
-                        .saw_effective(media_rule);
-                }
             }
             CssRule::Keyframes(ref keyframes_rule) => {
                 let keyframes_rule = keyframes_rule.read_with(guard);
@@ -1594,7 +1557,58 @@ fn note_rules_for_cascade_and_invalidation<'a, 'b>(
                     .borrow_mut_for_origin(&origin)
                     .add_counter_style(guard, rule);
             }
-            // We don't care about any other rule.
+            _ => {}
+        }
+    }
+}
+
+fn note_rules_for_invalidation<'a, 'b>(
+    iter: EffectiveRulesIterator<'a, 'b>,
+    guard: &SharedRwLockReadGuard,
+    quirks_mode: QuirksMode,
+    invalidation_data: &mut InvalidationData,
+)
+{
+    for rule in iter {
+        match *rule {
+            CssRule::Style(ref locked) => {
+                let style_rule = locked.read_with(&guard);
+                for selector in &style_rule.selectors.0 {
+                    invalidation_data
+                        .invalidation_map
+                        .note_selector(selector, quirks_mode);
+                    let mut visitor = StylistSelectorVisitor {
+                        needs_revalidation: false,
+                        passed_rightmost_selector: false,
+                        attribute_dependencies: &mut invalidation_data.attribute_dependencies,
+                        style_attribute_dependency: &mut invalidation_data.style_attribute_dependency,
+                        state_dependencies: &mut invalidation_data.state_dependencies,
+                        mapped_ids: &mut invalidation_data.mapped_ids,
+                    };
+
+                    selector.visit(&mut visitor);
+
+                    if visitor.needs_revalidation {
+                        let hashes = AncestorHashes::new(&selector, quirks_mode);
+                        invalidation_data.selectors_for_cache_revalidation.insert(
+                            RevalidationSelectorAndHashes::new(selector.clone(), hashes),
+                            quirks_mode
+                        );
+                    }
+                }
+            }
+            CssRule::Import(ref lock) => {
+                let import_rule = lock.read_with(guard);
+                invalidation_data
+                    .effective_media_query_results
+                    .saw_effective(import_rule);
+            }
+            CssRule::Media(ref lock) => {
+                let media_rule = lock.read_with(guard);
+                invalidation_data
+                    .effective_media_query_results
+                    .saw_effective(media_rule);
+            }
             _ => {}
         }
     }
