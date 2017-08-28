@@ -1222,6 +1222,7 @@ impl LayoutThread {
                 Some(ua_stylesheets),
                 &mut extra_data,
                 Some(element),
+                self.parallel_traversal.as_ref(),
             );
         }
 

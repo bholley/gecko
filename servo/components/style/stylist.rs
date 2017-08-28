@@ -21,6 +21,7 @@ use properties::{AnimationRules, PropertyDeclarationBlock};
 #[cfg(feature = "servo")]
 use properties::INHERIT_ALL;
 use properties::IS_LINK;
+use rayon;
 use rule_tree::{CascadeLevel, RuleTree, StyleSource};
 use selector_map::{PrecomputedHashMap, SelectorMap, SelectorMapEntry};
 use selector_parser::{SelectorImpl, PerPseudoElementMap, PseudoElement};
@@ -100,6 +101,7 @@ impl DocumentCascadeAndInvalidationData {
         guards: &StylesheetGuards,
         ua_stylesheets: Option<&UserAgentStylesheets>,
         extra_data: &mut PerOrigin<ExtraStyleData>,
+        thread_pool: Option<&rayon::ThreadPool>,
     )
     where
         'b: 'a,
@@ -159,6 +161,7 @@ impl DocumentCascadeAndInvalidationData {
                     guards.ua_or_user,
                     extra_data,
                     SheetRebuildKind::Full,
+                    thread_pool,
                 );
             }
 
@@ -188,6 +191,7 @@ impl DocumentCascadeAndInvalidationData {
                         guards.ua_or_user,
                         extra_data,
                         SheetRebuildKind::Full,
+                        None,
                     );
                 }
             }
@@ -201,6 +205,7 @@ impl DocumentCascadeAndInvalidationData {
                 guards.author,
                 extra_data,
                 rebuild_kind,
+                thread_pool,
             );
         }
     }
@@ -213,6 +218,7 @@ impl DocumentCascadeAndInvalidationData {
         guard: &SharedRwLockReadGuard,
         _extra_data: &mut PerOrigin<ExtraStyleData>,
         rebuild_kind: SheetRebuildKind,
+        thread_pool: Option<&rayon::ThreadPool>,
     )
     where
         S: StylesheetInDocument + ToMediaListKey + 'static,
@@ -233,25 +239,42 @@ impl DocumentCascadeAndInvalidationData {
                              .saw_effective(stylesheet);
         }
 
-        let effective_rules_iter = stylesheet.effective_rules(device, guard);
-        note_rules_for_cascade(
-            effective_rules_iter.clone(),
-            guard,
-            _extra_data,
-            &mut self.precomputed_pseudo_element_decls,
-            quirks_mode,
-            origin,
-            &mut cascade_data,
-        );
+        let rebuild_invalidation = rebuild_kind.should_rebuild_invalidation();
+        let iter_for_cascade = stylesheet.effective_rules(device, guard);
+        let iter_for_invalidation =
+            if rebuild_invalidation { Some(iter_for_cascade.clone()) } else { None };
+        let precomputed_pseudo_element_decls = &mut self.precomputed_pseudo_element_decls;
 
-        if rebuild_kind.should_rebuild_invalidation() {
+        let note_for_cascade = || {
+            note_rules_for_cascade(
+                iter_for_cascade,
+                guard,
+                _extra_data,
+                precomputed_pseudo_element_decls,
+                quirks_mode,
+                origin,
+                &mut cascade_data,
+            );
+        };
+
+        let note_for_invalidation = || {
             note_rules_for_invalidation(
-                effective_rules_iter,
+                iter_for_invalidation.unwrap(),
                 guard,
                 quirks_mode,
                 &mut invalidation_data,
             );
+        };
+
+        if thread_pool.is_some() && rebuild_invalidation {
+            thread_pool.unwrap().join(note_for_cascade, note_for_invalidation);
+        } else {
+            note_for_cascade();
+            if rebuild_invalidation {
+                note_for_invalidation();
+            }
         }
+
     }
 }
 
@@ -415,6 +438,7 @@ impl Stylist {
         ua_sheets: Option<&UserAgentStylesheets>,
         extra_data: &mut PerOrigin<ExtraStyleData>,
         document_element: Option<E>,
+        thread_pool: Option<&rayon::ThreadPool>,
     ) -> bool
     where
         E: TElement,
@@ -470,6 +494,7 @@ impl Stylist {
             guards,
             ua_sheets,
             extra_data,
+            thread_pool,
         );
 
         had_invalidations

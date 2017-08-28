@@ -6,6 +6,7 @@
 
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use dom::TElement;
+use gecko::global_style_data::STYLE_THREAD_POOL;
 use gecko_bindings::bindings::{self, RawServoStyleSet};
 use gecko_bindings::structs::{ServoStyleSheet, StyleSheetInfo, ServoStyleSheetInner};
 use gecko_bindings::structs::RawGeckoPresContextOwned;
@@ -156,11 +157,13 @@ impl PerDocumentStyleDataImpl {
     where
         E: TElement,
     {
+        let thread_pool_holder = &*STYLE_THREAD_POOL;
         self.stylist.flush(
             &StylesheetGuards::same(guard),
             /* ua_sheets = */ None,
             &mut self.extra_style_data,
             document_element,
+            thread_pool_holder.style_thread_pool.as_ref(),
         )
     }
 
