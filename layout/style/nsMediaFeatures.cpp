@@ -123,7 +123,8 @@ GetDeviceContextFor(nsPresContext* aPresContext)
 static bool
 ShouldResistFingerprinting(nsPresContext* aPresContext)
 {
-  return nsContentUtils::ShouldResistFingerprinting(aPresContext->GetDocShell());
+  return false;
+  //return nsContentUtils::ShouldResistFingerprinting(aPresContext->GetDocShell());
 }
 
 // A helper for three features below.

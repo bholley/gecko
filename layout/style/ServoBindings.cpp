@@ -2753,7 +2753,7 @@ Gecko_DocumentRule_UseForPresentation(RawGeckoPresContextBorrowed aPresContext,
                                       const nsACString* aPattern,
                                       css::URLMatchingFunction aURLMatchingFunction)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  // MOZ_ASSERT(NS_IsMainThread());
 
   nsIDocument *doc = aPresContext->Document();
   nsIURI *docURI = doc->GetDocumentURI();
