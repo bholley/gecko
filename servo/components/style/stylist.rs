@@ -1656,6 +1656,10 @@ pub struct ExtraStyleData {
     pub counter_styles: PrecomputedHashMap<Atom, Arc<Locked<CounterStyleRule>>>,
 }
 
+// FIXME(bholley): Make this safer.
+unsafe impl Sync for ExtraStyleData {}
+unsafe impl Send for ExtraStyleData {}
+
 #[cfg(feature = "gecko")]
 impl ExtraStyleData {
     /// Add the given @font-face rule.

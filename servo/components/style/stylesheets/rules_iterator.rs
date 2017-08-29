@@ -25,6 +25,12 @@ pub struct RulesIterator<'a, 'b, C>
     _phantom: ::std::marker::PhantomData<C>,
 }
 
+// FIXME(bholley): Make this safer!
+unsafe impl<'a, 'b, C> Send for RulesIterator<'a, 'b, C>
+    where 'b: 'a,
+          C: NestedRuleIterationCondition + 'static,
+{}
+
 impl<'a, 'b, C> RulesIterator<'a, 'b, C>
     where 'b: 'a,
           C: NestedRuleIterationCondition + 'static,
