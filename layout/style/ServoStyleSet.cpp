@@ -93,6 +93,9 @@ ServoStyleSet::ServoStyleSet()
   , mUserFontCacheUpdateGeneration(0)
   , mNeedsRestyleAfterEnsureUniqueInner(false)
 {
+  // We need to invoke this before the first stylist rebuild, but doing it in
+  // InitializeServo causes XPCShell crashes. So we just do it here.
+  nsCSSRuleProcessor::InitSystemMetrics();
 }
 
 ServoStyleSet::~ServoStyleSet()
