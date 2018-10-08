@@ -12,8 +12,9 @@
 
 [package]
 name = "rayon"
-version = "1.0.0"
+version = "1.0.2"
 authors = ["Niko Matsakis <niko@alum.mit.edu>", "Josh Stone <cuviper@gmail.com>"]
+build = "build.rs"
 description = "Simple work-stealing parallelism for Rust"
 documentation = "https://docs.rs/rayon/"
 readme = "README.md"
@@ -21,6 +22,9 @@ keywords = ["parallel", "thread", "concurrency", "join", "performance"]
 categories = ["concurrency"]
 license = "Apache-2.0/MIT"
 repository = "https://github.com/rayon-rs/rayon"
+[dependencies.crossbeam-deque]
+version = "0.2.0"
+
 [dependencies.either]
 version = "1.0"
 default-features = false
@@ -28,18 +32,16 @@ default-features = false
 [dependencies.rayon-core]
 version = "1.4"
 [dev-dependencies.docopt]
-version = "0.8"
+version = "1"
 
 [dev-dependencies.lazy_static]
 version = "1"
 
 [dev-dependencies.rand]
-version = ">= 0.3, < 0.5"
+version = "0.5"
 
 [dev-dependencies.serde]
 version = "1"
 
 [dev-dependencies.serde_derive]
 version = "1"
-[target."cfg(not(all(windows, target_env = \"gnu\")))".dev-dependencies.compiletest_rs]
-version = "0.3"

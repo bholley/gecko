@@ -1,7 +1,5 @@
 #![doc(html_root_url = "https://docs.rs/rayon/1.0")]
 #![deny(missing_debug_implementations)]
-#![cfg_attr(test, feature(conservative_impl_trait))]
-#![cfg_attr(test, feature(i128_type))]
 #![deny(missing_docs)]
 
 //! Data-parallelism library that makes it easy to convert sequential
@@ -28,7 +26,7 @@
 //!   - [`ThreadPoolBuilder`] can be used to create your own thread pools or customize
 //!     the global one.
 //!
-//! [iter module]: iter
+//! [iter module]: iter/index.html
 //! [`join`]: fn.join.html
 //! [`scope`]: fn.scope.html
 //! [`par_sort`]: slice/trait.ParallelSliceMut.html#method.par_sort
@@ -50,7 +48,7 @@
 //! parallel implementations of many iterative functions such as [`map`],
 //! [`for_each`], [`filter`], [`fold`], and [more].
 //!
-//! [`rayon::prelude::*`]: prelude/index.html
+//! [`rayon::prelude`]: prelude/index.html
 //! [`map`]: iter/trait.ParallelIterator.html#method.map
 //! [`for_each`]: iter/trait.ParallelIterator.html#method.for_each
 //! [`filter`]: iter/trait.ParallelIterator.html#method.filter
@@ -81,6 +79,7 @@
 
 extern crate rayon_core;
 extern crate either;
+extern crate crossbeam_deque;
 
 #[cfg(test)]
 extern crate rand;
@@ -105,7 +104,8 @@ pub mod vec;
 
 mod par_either;
 mod math;
-mod test;
+
+mod compile_fail;
 
 pub use rayon_core::current_num_threads;
 pub use rayon_core::ThreadPool;
