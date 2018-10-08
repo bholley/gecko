@@ -4,9 +4,10 @@
 //! [`scope()`]: fn.scope.html
 //! [`join()`]: ../join/join.fn.html
 
+use crossbeam::sync::SegQueue;
 use latch::{Latch, CountLatch};
 use log::Event::*;
-use job::HeapJob;
+use job::{HeapJob, Job, JobRef};
 use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
@@ -32,6 +33,8 @@ pub struct Scope<'scope> {
 
     /// thread registry where `scope()` was executed.
     registry: Arc<Registry>,
+
+    queue: ScopeQueue,
 
     /// if some job panicked, the error is stored here; it will be
     /// propagated to the one who created the scope
@@ -267,6 +270,7 @@ pub fn scope<'scope, OP, R>(op: OP) -> R
                 panic: AtomicPtr::new(ptr::null_mut()),
                 job_completed_latch: CountLatch::new(),
                 marker: PhantomData,
+                queue: ScopeQueue::new(),
             };
             let result = scope.execute_job_closure(op);
             scope.steal_till_jobs_complete(owner_thread);
@@ -333,13 +337,10 @@ impl<'scope> Scope<'scope> {
     {
         unsafe {
             self.job_completed_latch.increment();
-            let job_ref = Box::new(HeapJob::new(move || self.execute_job(body)))
-                .as_job_ref();
+            let job = Box::new(HeapJob::new(move || self.execute_job(body)));
 
-            // Since `Scope` implements `Sync`, we can't be sure
-            // that we're still in a thread of this pool, so we
-            // can't just push to the local worker thread.
-            self.registry.inject_or_push(job_ref);
+            // Use our private queue to execute in FIFO order.
+            self.queue.inject(&self.registry, job.as_job_ref());
         }
     }
 
@@ -413,5 +414,40 @@ impl<'scope> fmt::Debug for Scope<'scope> {
             .field("panic", &self.panic)
             .field("job_completed_latch", &self.job_completed_latch)
             .finish()
+    }
+}
+
+/// Private queue to provide FIFO job priority.
+struct ScopeQueue {
+    inner: SegQueue<JobRef>,
+}
+
+impl ScopeQueue {
+    fn new() -> Self {
+        ScopeQueue {
+            inner: SegQueue::new(),
+        }
+    }
+
+    unsafe fn inject(&self, registry: &Registry, job_ref: JobRef) {
+        // A little indirection ensures that spawns are always prioritized in FIFO order.  The
+        // jobs in a thread's deque may be popped from the back (LIFO) or stolen from the front
+        // (FIFO), but either way they will end up popping from the front of this queue.
+        self.inner.push(job_ref);
+
+        // Since `Scope` implements `Sync`, we can't be sure that we're still in a thread of this
+        // pool, so we can't just push to the local worker thread.
+        registry.inject_or_push(JobRef::new(self));
+    }
+}
+
+impl Job for ScopeQueue {
+    unsafe fn execute(this: *const Self) {
+        // We "execute" a queue by executing its first job, FIFO.
+        (*this)
+            .inner
+            .try_pop()
+            .expect("job in scope queue")
+            .execute()
     }
 }
