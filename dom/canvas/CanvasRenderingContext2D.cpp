@@ -1495,6 +1495,8 @@ CanvasRenderingContext2D::RenderingMode CanvasRenderingContext2D::EnsureTarget(
     return aRenderingMode;
   }
 
+  gfxPlatform::GetPlatform()->EnsureDevicesInitialized();
+
   // This would make no sense, so make sure we don't get ourselves in a mess
   MOZ_ASSERT(mRenderingMode != RenderingMode::DefaultBackendMode);
 

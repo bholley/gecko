@@ -424,7 +424,6 @@ void gfxWindowsPlatform::InitAcceleration() {
   DeviceManagerDx::Init();
 
   InitializeConfig();
-  InitializeDevices();
   UpdateANGLEConfig();
   UpdateRenderMode();
 
@@ -497,7 +496,9 @@ bool gfxWindowsPlatform::HandleDeviceReset() {
   gfxConfig::Reset(Feature::DIRECT2D);
 
   InitializeConfig();
-  InitializeDevices();
+  if (mInitializedDevices) {
+    InitializeDevices();
+  }
   UpdateANGLEConfig();
   return true;
 }
@@ -1468,6 +1469,16 @@ void gfxWindowsPlatform::InitializeD3D11Config() {
   }
   Telemetry::Accumulate(Telemetry::GFX_CONTENT_FAILED_TO_ACQUIRE_DEVICE,
                         uint32_t(aDevice));
+}
+
+// Supports lazy device initialization on Windows, so that WebRender can avoid
+// initializing GPU state and allocating swap chains for most non-GPU processes.
+void gfxWindowsPlatform::EnsureDevicesInitialized() {
+  if (!mInitializedDevices) {
+    InitializeDevices();
+    UpdateBackendPrefs();
+    mInitializedDevices = true;
+  }
 }
 
 void gfxWindowsPlatform::InitializeDevices() {
