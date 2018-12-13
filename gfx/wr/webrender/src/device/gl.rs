@@ -473,8 +473,8 @@ impl<T> Drop for VBO<T> {
 
 #[cfg_attr(feature = "replay", derive(Clone))]
 pub struct ExternalTexture {
-    id: gl::GLuint,
-    target: gl::GLuint,
+    pub id: gl::GLuint,
+    pub target: gl::GLuint,
 }
 
 impl ExternalTexture {
@@ -505,7 +505,7 @@ bitflags! {
 /// reachable from this struct, manual destruction via `Device` is required.
 /// Our `Drop` implementation asserts that this has happened.
 pub struct Texture {
-    id: gl::GLuint,
+    pub id: gl::GLuint,
     target: gl::GLuint,
     layer_count: i32,
     format: ImageFormat,
@@ -2180,7 +2180,6 @@ impl Device {
         }
     }
 
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
         let desc = self.gl_describe_format(img_desc.format);
         self.gl.read_pixels(
@@ -2246,8 +2245,7 @@ impl Device {
     }
 
     /// Attaches the provided texture to the current Read FBO binding.
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
-    fn attach_read_texture_raw(
+    pub fn attach_read_texture_raw(
         &mut self, texture_id: gl::GLuint, target: gl::GLuint, layer_id: i32
     ) {
         match target {
@@ -2273,7 +2271,6 @@ impl Device {
         }
     }
 
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture_external(
         &mut self, texture_id: gl::GLuint, target: TextureTarget, layer_id: i32
     ) {

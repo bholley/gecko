@@ -3856,6 +3856,7 @@ impl Renderer {
             let ext_image = props
                 .external_image
                 .expect("BUG: Deferred resolves must be external images!");
+
             // Provide rendering information for NativeTexture external images.
             let image = handler.lock(ext_image.id, ext_image.channel_index, deferred_resolve.rendering);
             let texture_target = match ext_image.image_type {
@@ -3887,6 +3888,22 @@ impl Renderer {
                     panic!("Raw external data is not expected for deferred resolves!");
                 }
             };
+
+            if props.descriptor.size == DeviceIntSize::new(333, 444) {
+              let mut e = self.device.gl().get_error();
+              while (e != 0) {
+                println!("Error before: {}", e);
+                e = self.device.gl().get_error();
+              }
+              self.device.bind_read_target_impl(self.read_fbo);
+              println!("Error after bind: {}", self.device.gl().get_error());
+              self.device.attach_read_texture_raw(texture.id, gl::TEXTURE_2D, 0);
+              println!("Error after attach: {}", self.device.gl().get_error());
+              let pixels = self.device.read_pixels(&props.descriptor);
+              println!("Error after read: {}", self.device.gl().get_error());
+              println!("Doing deferred resolve for canvas texture: {}, image.source: {:?}, descriptor: {:?}, pixels: {:?}", texture.id, image.source, props.descriptor, &pixels[0..20]);
+              self.device.reset_read_target();
+            }
 
             self.texture_resolver
                 .external_images
@@ -4639,7 +4656,9 @@ impl Renderer {
     }
 }
 
+#[derive(Debug)]
 pub enum ExternalImageSource<'a> {
+#[derive(Debug)]
     RawData(&'a [u8]),  // raw buffers.
     NativeTexture(u32), // It's a gl::GLuint texture handle
     Invalid,
