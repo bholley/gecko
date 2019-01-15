@@ -18,7 +18,9 @@ use resource_cache::{ResourceCache};
 use util::{MatrixHelpers};
 use prim_store::PrimitiveInstanceKind;
 use std::ops;
+use std::sync::Arc;
 use storage;
+use util::PrimaryArc;
 
 /// A run of glyphs, with associated font information.
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -28,7 +30,7 @@ pub struct TextRunKey {
     pub common: PrimKeyCommonData,
     pub font: FontInstance,
     pub offset: VectorKey,
-    pub glyphs: Vec<GlyphInstance>,
+    pub glyphs: PrimaryArc<Vec<GlyphInstance>>,
     pub shadow: bool,
 }
 
@@ -45,7 +47,7 @@ impl TextRunKey {
             ),
             font: text_run.font,
             offset: text_run.offset.into(),
-            glyphs: text_run.glyphs,
+            glyphs: PrimaryArc(text_run.glyphs),
             shadow: text_run.shadow,
         }
     }
@@ -78,7 +80,8 @@ pub struct TextRunTemplate {
     pub common: PrimTemplateCommonData,
     pub font: FontInstance,
     pub offset: LayoutVector2D,
-    pub glyphs: Vec<GlyphInstance>,
+    #[ignore_malloc_size_of = "Measured via PrimaryArc"]
+    pub glyphs: Arc<Vec<GlyphInstance>>,
 }
 
 impl ops::Deref for TextRunTemplate {
@@ -101,7 +104,7 @@ impl From<TextRunKey> for TextRunTemplate {
             common,
             font: item.font,
             offset: item.offset.into(),
-            glyphs: item.glyphs,
+            glyphs: item.glyphs.0,
         }
     }
 }
@@ -173,7 +176,7 @@ pub type TextRunDataInterner = intern::Interner<TextRunKey, PrimitiveSceneData, 
 pub struct TextRun {
     pub font: FontInstance,
     pub offset: LayoutVector2D,
-    pub glyphs: Vec<GlyphInstance>,
+    pub glyphs: Arc<Vec<GlyphInstance>>,
     pub shadow: bool,
 }
 
