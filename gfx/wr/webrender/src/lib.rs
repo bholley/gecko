@@ -56,6 +56,8 @@ extern crate bitflags;
 #[macro_use]
 extern crate cfg_if;
 #[macro_use]
+extern crate derive_more;
+#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;

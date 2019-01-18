@@ -2481,10 +2481,10 @@ impl Renderer {
         profile_scope!("render");
         if self.active_documents.is_empty() {
             self.last_time = precise_time_ns();
-            return Ok(RendererStats::empty());
+            return Ok(RendererStats::default());
         }
 
-        let mut stats = RendererStats::empty();
+        let mut stats = RendererStats::default();
         let mut frame_profiles = Vec::new();
         let mut profile_timers = RendererProfileTimers::new();
 
@@ -4858,6 +4858,7 @@ impl DebugServer {
 // tests are batching and/or allocating on render
 // targets as we expect them to.
 #[repr(C)]
+#[derive(AddAssign, Clone, Default)]
 pub struct RendererStats {
     pub total_draw_calls: usize,
     pub alpha_target_count: usize,
@@ -4866,21 +4867,6 @@ pub struct RendererStats {
     pub resource_upload_time: u64,
     pub gpu_cache_upload_time: u64,
 }
-
-impl RendererStats {
-    pub fn empty() -> Self {
-        RendererStats {
-            total_draw_calls: 0,
-            alpha_target_count: 0,
-            color_target_count: 0,
-            texture_upload_kb: 0,
-            resource_upload_time: 0,
-            gpu_cache_upload_time: 0,
-        }
-    }
-}
-
-
 
 #[cfg(any(feature = "capture", feature = "replay"))]
 #[cfg_attr(feature = "capture", derive(Serialize))]

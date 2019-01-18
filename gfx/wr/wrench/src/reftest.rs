@@ -69,7 +69,7 @@ impl Display for ReftestOp {
 
 pub struct Reftest {
     op: ReftestOp,
-    test: PathBuf,
+    test: Vec<PathBuf>,
     reference: PathBuf,
     font_render_mode: Option<FontRenderMode>,
     max_difference: usize,
@@ -84,10 +84,11 @@ pub struct Reftest {
 
 impl Display for Reftest {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        let paths: Vec<String> = self.test.iter().map(|t| t.display().to_string()).collect();
         write!(
             f,
             "{} {} {}",
-            self.test.display(),
+            paths.join(", "),
             self.op,
             self.reference.display()
         )
@@ -200,6 +201,7 @@ impl ReftestManifest {
             let mut zoom_factor = 1.0;
             let mut allow_mipmaps = false;
 
+            let mut paths = vec![];
             for (i, token) in tokens.iter().enumerate() {
                 match *token {
                     "include" => {
@@ -262,25 +264,38 @@ impl ReftestManifest {
                         op = ReftestOp::NotEqual;
                     }
                     _ => {
-                        reftests.push(Reftest {
-                            op,
-                            test: dir.join(tokens[i + 0]),
-                            reference: dir.join(tokens[i + 1]),
-                            font_render_mode,
-                            max_difference: cmp::max(max_difference, options.allow_max_difference),
-                            num_differences: cmp::max(max_count, options.allow_num_differences),
-                            expected_draw_calls,
-                            expected_alpha_targets,
-                            expected_color_targets,
-                            disable_dual_source_blending,
-                            allow_mipmaps,
-                            zoom_factor,
-                        });
-
-                        break;
+                        paths.push(dir.join(*token));
                     }
                 }
             }
+
+            // Don't try to add tests for include lines.
+            if paths.len() < 2 {
+                assert_eq!(paths.len(), 0, "Only one path provided: {:?}", paths[0]);
+                continue;
+            }
+
+            // The reference is the last path provided. If multiple paths are
+            // passed for the test, they render sequentially before being
+            // compared to the reference, which is useful for testing
+            // invalidation.
+            let reference = paths.pop().unwrap();
+            let test = paths;
+
+            reftests.push(Reftest {
+                op,
+                test,
+                reference,
+                font_render_mode,
+                max_difference: cmp::max(max_difference, options.allow_max_difference),
+                num_differences: cmp::max(max_count, options.allow_num_differences),
+                expected_draw_calls,
+                expected_alpha_targets,
+                expected_color_targets,
+                disable_dual_source_blending,
+                allow_mipmaps,
+                zoom_factor,
+            });
         }
 
         ReftestManifest { reftests: reftests }
@@ -290,7 +305,7 @@ impl ReftestManifest {
         self.reftests
             .iter()
             .filter(|x| {
-                x.test.starts_with(prefix) || x.reference.starts_with(prefix)
+                x.test.iter().any(|t| t.starts_with(prefix)) || x.reference.starts_with(prefix)
             })
             .collect()
     }
@@ -361,7 +376,7 @@ impl<'a> ReftestHarness<'a> {
         let reference = match t.reference.extension().unwrap().to_str().unwrap() {
             "yaml" => {
                 let (reference, _) = self.render_yaml(
-                    t.reference.as_path(),
+                    &t.reference,
                     window_size,
                     t.font_render_mode,
                     t.allow_mipmaps,
@@ -376,12 +391,19 @@ impl<'a> ReftestHarness<'a> {
 
         // the reference can be smaller than the window size,
         // in which case we only compare the intersection
-        let (test, stats) = self.render_yaml(
-            t.test.as_path(),
-            reference.size,
-            t.font_render_mode,
-            t.allow_mipmaps,
-        );
+        let mut stats = RendererStats::default();
+        let mut images = vec![];
+        for filename in t.test.iter() {
+            let (image, sts) = self.render_yaml(
+                &filename,
+                reference.size,
+                t.font_render_mode,
+                t.allow_mipmaps,
+            );
+            stats += sts;
+            images.push(image);
+        }
+        let test = images.pop().unwrap();
 
         if t.disable_dual_source_blending {
             self.wrench

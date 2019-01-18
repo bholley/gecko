@@ -3021,6 +3021,7 @@ dependencies = [
  "core-foundation 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "core-graphics 0.17.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "core-text 13.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "derive_more 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "dwrote 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "freetype 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "fxhash 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
