@@ -1451,9 +1451,11 @@ void WebRenderCommandBuilder::BuildWebRenderCommands(
       mZoomProp->id = AnimationHelper::GetNextCompositorAnimationsId();
     }
 
+    wr::StackingContextParams params;
+    params.mFilters = aFilters;
+    params.mBase.animation = mZoomProp.ptrOr(nullptr);
     StackingContextHelper pageRootSc(sc, nullptr, nullptr, nullptr, aBuilder,
-                                     aFilters, LayoutDeviceRect(), nullptr,
-                                     mZoomProp.ptrOr(nullptr));
+                                     params);
     if (ShouldDumpDisplayList(aDisplayListBuilder)) {
       mBuilderDumpIndex =
           aBuilder.Dump(mDumpIndent + 1, Some(mBuilderDumpIndex), Nothing());
