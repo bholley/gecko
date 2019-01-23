@@ -1903,6 +1903,8 @@ pub struct WrStackingContextParams {
     pub reference_frame_kind: ReferenceFrameKind,
     pub mix_blend_mode: MixBlendMode,
     pub is_backface_visible: bool,
+    /// True if picture caching should be enabled for this stacking context.
+    pub cache_tiles: bool,
 }
 
 #[no_mangle]
@@ -1996,7 +1998,8 @@ pub extern "C" fn wr_dp_push_stacking_context(
                                 params.transform_style,
                                 params.mix_blend_mode,
                                 &filters,
-                                glyph_raster_space);
+                                glyph_raster_space,
+                                params.cache_tiles);
 
     result
 }
