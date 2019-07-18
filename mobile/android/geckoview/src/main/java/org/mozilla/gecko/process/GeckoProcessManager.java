@@ -10,6 +10,7 @@ import org.mozilla.gecko.IGeckoEditableChild;
 import org.mozilla.gecko.IGeckoEditableParent;
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.util.XPCOMEventTarget;
 
 import org.mozilla.geckoview.GeckoResult;
 
@@ -213,13 +214,16 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
                              final int prefsFd, final int prefMapFd,
                              final int ipcFd,
                              final int crashFd, final int crashAnnotationFd) {
-        int pid = INSTANCE.start(type, args, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ false);
         GeckoResult<Integer> result = new GeckoResult<>();
-        if (pid == 0) {
-            result.completeExceptionally(new RuntimeException("Failed to start process"));
-        } else {
-            result.complete(pid);
-        }
+
+        XPCOMEventTarget.launcherThread().dispatch(() -> {
+            int pid = INSTANCE.start(type, args, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ false);
+            if (pid == 0) {
+                result.completeExceptionally(new RuntimeException("Failed to start process"));
+            } else {
+                result.complete(pid);
+            }
+        });
         return result;
     }
 
