@@ -16,6 +16,10 @@
 // file.
 #include "mozilla/dom/MIDIMessageQueue.h"
 
+namespace mozilla {
+class TaskQueue;
+}
+
 namespace mozilla::dom {
 
 class MIDIManagerParent;
@@ -67,6 +71,12 @@ class MIDIPlatformService {
   // Object will only be destroyed if there are no more MIDIManager and MIDIPort
   // protocols left to communicate with.
   void MaybeStop();
+
+  // Initializes statics on startup.
+  static void InitStatics();
+
+  // Returns the MIDI Task Queue.
+  static nsISerialEventTarget* OwnerThread();
 
   // True if service is live.
   static bool IsRunning();
